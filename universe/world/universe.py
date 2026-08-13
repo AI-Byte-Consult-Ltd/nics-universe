@@ -18,8 +18,8 @@ from universe.world import eras
 GRID_SIZE = 4
 WILDLIFE_TERRITORIES = 5
 MIGRATION_CHECK_CHANCE = 0.05
-LOW_POPULATION_THRESHOLD = 3
-WANDERER_CHANCE = 0.02
+REINCARNATION_CHANCE = 0.03
+KNOWLEDGE_TEACHING_CHANCE = 0.05
 
 
 class Universe:
@@ -141,9 +141,10 @@ class Universe:
             self._step_all()
             self._handle_reproduction()
             self._handle_research_and_professions()
+            self._handle_knowledge_transfer()
             self._handle_migration()
             self._handle_society_merges()
-            self._handle_replenishment()
+            self._handle_reincarnation()
             self.era = eras.era_for(self.knowledge_tree.total_discoveries())
 
     def _step_all(self) -> None:
@@ -171,6 +172,7 @@ class Universe:
             society=parent1.society,
             parents=[parent1.id, parent2.id],
         )
+        child.knowledge = list(set(parent1.knowledge) | set(parent2.knowledge))
         self.programs[child.id] = child
 
         parent1.children.append(child.id)
@@ -233,6 +235,34 @@ class Universe:
             elif self.professions.maybe_assign(p):
                 self.log(f"{p.name} осваивает призвание: {p.profession}.")
 
+    def _handle_knowledge_transfer(self) -> None:
+        """Знание не остаётся заперто в одном первооткрывателе — оно
+        передаётся дальше через живое общение внутри общины."""
+        by_location: Dict[str, List[Program]] = {}
+        for p in self.living():
+            if p.sapient:
+                by_location.setdefault(p.location, []).append(p)
+
+        for members in by_location.values():
+            if len(members) < 2:
+                continue
+            teacher = random.choice(members)
+            if not teacher.knowledge:
+                continue
+            student = random.choice(members)
+            if student.id == teacher.id:
+                continue
+            unknown = [d for d in teacher.knowledge if d not in student.knowledge]
+            if not unknown:
+                continue
+            sociability = (teacher.trait("sociability", 30) + student.trait("sociability", 30)) / 2
+            if random.random() < KNOWLEDGE_TEACHING_CHANCE * (sociability / 100):
+                learned_id = random.choice(unknown)
+                student.knowledge.append(learned_id)
+                discovery = self.knowledge_tree.discoveries.get(learned_id)
+                if discovery:
+                    self.log(f"Обучение: {student.name} перенимает у {teacher.name} знание «{discovery.name}».")
+
     def _handle_migration(self) -> None:
         occupancy: Dict[str, int] = {}
         for p in self.living():
@@ -293,37 +323,48 @@ class Universe:
                     self.log(f"Слияние обществ: «{a.name}» поглотило «{b.name}».")
                     break
 
-    def _handle_replenishment(self) -> None:
-        """Малая изолированная популяция может вымереть от чистого невезения
-        (например, все выжившие дети оказались одного пола). Изредка к роду
-        прибивается одинокий странник — так угасание не необратимо."""
-        sapient_count = sum(1 for p in self.living() if p.sapient)
-        if sapient_count >= LOW_POPULATION_THRESHOLD:
+    def _handle_reincarnation(self) -> None:
+        """Существа не появляются ниоткуда — но и не исчезают безвозвратно.
+        Если разумная жизнь угасла целиком, она рано или поздно
+        перерождается: новая пара несёт черты (геном) и память (открытые
+        знания) погасшего рода, а не берётся из ниоткуда посторонней."""
+        if any(p.sapient for p in self.living()):
             return
-        if random.random() > WANDERER_CHANCE:
+        ancestors = [p for p in self.programs.values() if p.sapient and p.genome]
+        if not ancestors:
             return
+        if random.random() > REINCARNATION_CHANCE:
+            return
+
+        mother_line = random.choice(ancestors)
+        father_line = random.choice(ancestors)
+        genome1 = Genome.crossover(mother_line.genome, father_line.genome).mutate(rate=0.2, strength=0.2)
+        genome2 = Genome.crossover(mother_line.genome, father_line.genome).mutate(rate=0.2, strength=0.2)
 
         active_societies = [s for s in self.societies.values() if not s.absorbed and s.territories]
         if active_societies:
-            society = random.choice(active_societies)
+            society = max(active_societies, key=lambda s: len(s.territories))
             location = random.choice(society.territories)
-            society_id = society.id
         else:
             society = found_society(self._new_society_id(), self.tick)
             location = random.choice(list(self.territories.keys()))
             self.territories[location].society_id = society.id
             society.territories.append(location)
             self.societies[society.id] = society
-            society_id = society.id
 
-        males = sum(1 for p in self.living() if p.sapient and p.society == society_id and p.sex == "male")
-        females = sum(1 for p in self.living() if p.sapient and p.society == society_id and p.sex == "female")
-        sex = "female" if males >= females else "male"
+        style = society.get_language_style()
+        inherited_knowledge = list(self.knowledge_tree.discoveries.keys())
 
-        wanderer = self.spawn_human(sex=sex, location=location, society_id=society_id)
-        wanderer.age = behavior.MATURITY_TICKS + random.randint(0, 4 * behavior.YEAR_TICKS)
-        society.members.append(wanderer.id)
-        self.log(f"Странник: {wanderer.name} приходит и остаётся в «{society.name}».")
+        first = self.spawn_human(sex="male", genome=genome1, location=location,
+                                  society_id=society.id, style=style)
+        second = self.spawn_human(sex="female", genome=genome2, location=location,
+                                   society_id=society.id, style=style)
+        first.knowledge = list(inherited_knowledge)
+        second.knowledge = list(inherited_knowledge)
+        society.members.extend([first.id, second.id])
+
+        self.log(f"Перерождение: {first.name} и {second.name} возвращаются в мир, "
+                 f"храня память предков, в «{society.name}».")
 
     # ------------------------------------------------------------- views
     def status(self, detailed: bool = False) -> None:
