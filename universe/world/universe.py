@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 
 from universe.core.program import Program, LIVING
 from universe.core.genome import Genome
-from universe.core.namegen import LanguageStyle, generate_name, generate_species_name
+from universe.core.namegen import LanguageStyle, generate_name, generate_species_name, describe_dominant_traits
 from universe.agents import behavior
 from universe.knowledge.discovery import KnowledgeTree
 from universe.knowledge.professions import ProfessionRegistry
@@ -60,6 +60,22 @@ class Universe:
                 return p
         return None
 
+    def _print_profile(self, p: Program, label: str) -> None:
+        print(f"   └─ {label}: {p.name} ({p.id}) | пол: {p.sex} | вид: {p.kind}")
+        if p.genome and p.genome.genes:
+            traits = ", ".join(
+                f"{name} {value:.1f}"
+                for name, value in sorted(p.genome.genes.items(), key=lambda kv: -kv[1])
+            )
+            print(f"      Характеристики: {traits}")
+        print(f"      Профессия: {p.profession or '—'}   Известно открытий: {len(p.knowledge)}")
+        if p.parents:
+            parent_names = []
+            for pid in p.parents:
+                parent = self.programs.get(pid)
+                parent_names.append(f"{parent.name} ({pid})" if parent else pid)
+            print(f"      Родители: {', '.join(parent_names)}")
+
     # ------------------------------------------------------------ genesis
     def spawn_human(self, sex: Optional[str] = None, genome: Optional[Genome] = None,
                      location: Optional[str] = None, society_id: Optional[str] = None,
@@ -96,6 +112,7 @@ class Universe:
             species = generate_species_name()
             kind = f"animal:{species}"
             style = LanguageStyle.random_style()
+            pair = []
             for sex in ("male", "female"):
                 animal = Program(
                     id=self._new_id(),
@@ -110,7 +127,10 @@ class Universe:
                     location=tid,
                 )
                 self.programs[animal.id] = animal
-            self.log(f"В землях «{self.territories[tid].name}» замечен новый вид: {species}.")
+                pair.append(animal)
+            description = describe_dominant_traits(pair[0].genome.genes)
+            self.log(f"В землях «{self.territories[tid].name}» замечен новый вид животных «{species}» "
+                     f"({description}) — основатели: {pair[0].name} и {pair[1].name}.")
 
     def genesis(self):
         self.territories = build_grid(GRID_SIZE, GRID_SIZE)
@@ -128,6 +148,8 @@ class Universe:
         society.members.extend([first.id, second.id])
 
         self.log(f"Начало времён: {first.name} и {second.name} пробуждаются на земле «{origin.name}».")
+        self._print_profile(first, "Первый")
+        self._print_profile(second, "Вторая")
         self.log(f"Общество «{society.name}» основано.")
 
         self._spawn_wildlife()
@@ -186,6 +208,7 @@ class Universe:
             society.members.append(child.id)
 
         self.log(f"Рождение: {parent1.name} + {parent2.name} → {child.name} ({child.kind}).")
+        self._print_profile(child, "Родился(ась)")
         return child
 
     def _handle_reproduction(self) -> None:
@@ -365,6 +388,10 @@ class Universe:
 
         self.log(f"Перерождение: {first.name} и {second.name} возвращаются в мир, "
                  f"храня память предков, в «{society.name}».")
+        print(f"      Родовая линия: {mother_line.name} ({mother_line.id}) × "
+              f"{father_line.name} ({father_line.id})")
+        self._print_profile(first, "Первый")
+        self._print_profile(second, "Вторая")
 
     # ------------------------------------------------------------- views
     def status(self, detailed: bool = False) -> None:

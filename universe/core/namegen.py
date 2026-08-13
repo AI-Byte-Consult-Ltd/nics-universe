@@ -142,6 +142,28 @@ def generate_merge_reason() -> str:
     return random.choice(_MERGE_REASONS)
 
 
+TRAIT_ADJECTIVES = {
+    "intelligence": "смышлёное", "strength": "сильное", "curiosity": "любопытное",
+    "aggression": "агрессивное", "sociability": "стайное", "creativity": "изобретательное",
+    "empathy": "чуткое", "resilience": "живучее", "ambition": "напористое",
+    "intuition": "чуткое к опасности", "speed": "быстрое", "perception": "зоркое",
+    "memory_capacity": "памятливое", "adaptability": "приспособляемое", "focus": "сосредоточенное",
+    "charisma": "приметное", "patience": "терпеливое", "courage": "смелое",
+    "wisdom": "прозорливое", "dexterity": "ловкое", "stealth": "скрытное",
+    "endurance": "выносливое", "insight": "чуткое", "willpower": "упрямое",
+    "fertility": "плодовитое", "discipline": "дисциплинированное", "instinct": "инстинктивное",
+    "vitality": "живучее", "harmony": "гармоничное", "independence": "независимое",
+}
+
+
+def describe_dominant_traits(genes: dict, top_n: int = 2) -> str:
+    if not genes:
+        return "непримечательное"
+    top = sorted(genes.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+    words = [TRAIT_ADJECTIVES.get(name, name) for name, _ in top]
+    return " и ".join(words)
+
+
 _ADJECTIVE_EXCEPTIONS = {
     "потусторонний": ("потусторонний", "потусторонняя", "потустороннее"),
 }
